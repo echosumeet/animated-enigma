@@ -1,0 +1,54 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tradedoc"
+version = "0.1.0"
+description = "Trade document extraction, reconciliation and straight-through-processing measurement with self-generated ground truth"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Sumeet" }]
+keywords = [
+    "supply-chain",
+    "trade-documents",
+    "document-extraction",
+    "customs",
+    "incoterms",
+    "reconciliation",
+    "straight-through-processing",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Information Analysis",
+]
+dependencies = [
+    "numpy>=1.24",
+    "pydantic>=2.5",
+    "matplotlib>=3.7",
+    "reportlab>=4.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/echosumeet/tradedoc-intelligence"
+Source = "https://github.com/echosumeet/tradedoc-intelligence"
+
+[project.scripts]
+tradedoc = "tradedoc.cli:main"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py310"
