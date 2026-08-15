@@ -1,0 +1,58 @@
+{
+  "demand": {
+    "kind": "ar1",
+    "mean": 100.0,
+    "rho": 0.6,
+    "std": 20.0
+  },
+  "disruptions": {
+    "capacity_losses": [],
+    "outages": [
+      {
+        "duration": 6,
+        "node": "source",
+        "start": 400
+      }
+    ]
+  },
+  "forecast": {
+    "alpha": 0.3,
+    "kind": "exponential",
+    "phi": 0.85,
+    "window": 10
+  },
+  "info_mode": "decentralized",
+  "initial_periods_of_stock": 4.0,
+  "leadtime": {
+    "cv": 0.15,
+    "kind": "gamma",
+    "mean": [
+      2.0,
+      3.0,
+      5.0
+    ],
+    "no_crossing": false,
+    "order_lead_time": 1
+  },
+  "policy": {
+    "allow_returns": false,
+    "batch_multiple": 20.0,
+    "kind": "base_stock",
+    "min_order": 0.0,
+    "quantity_periods": 4.0,
+    "z": 2.05
+  },
+  "review_period": 2,
+  "run": {
+    "periods": 720,
+    "replications": 20,
+    "seed": 20260215,
+    "warmup": "auto"
+  },
+  "topology": {
+    "capacity": 260.0,
+    "kind": "serial",
+    "levels": 3,
+    "n_retailers": 3
+  }
+}

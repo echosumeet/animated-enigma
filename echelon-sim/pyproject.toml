@@ -1,0 +1,50 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "echelonsim"
+version = "0.1.0"
+description = "Discrete-event simulation of multi-echelon supply chains, with bullwhip measurement"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Sumeet" }]
+keywords = [
+    "supply-chain",
+    "discrete-event-simulation",
+    "bullwhip-effect",
+    "multi-echelon",
+    "inventory",
+    "operations-research",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Mathematics",
+]
+dependencies = [
+    "numpy>=1.24",
+    "scipy>=1.10",
+]
+
+[project.optional-dependencies]
+figures = ["matplotlib>=3.7"]
+
+[project.scripts]
+echelonsim = "echelonsim.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/echosumeet/echelon-sim"
+Source = "https://github.com/echosumeet/echelon-sim"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+echelonsim = ["py.typed"]
