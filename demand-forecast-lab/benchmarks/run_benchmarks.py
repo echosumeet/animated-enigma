@@ -1,0 +1,380 @@
+#!/usr/bin/env python3
+"""Regenerate every number and figure that appears in the README.
+
+Usage
+-----
+    python benchmarks/run_benchmarks.py                 # full run (~5-10 min)
+    python benchmarks/run_benchmarks.py --quick         # smaller panel, fewer windows
+    python benchmarks/run_benchmarks.py --no-figures    # tables only
+
+Writes ``benchmarks/results.md`` and the PNGs under ``docs/``.
+"""
+
+from __future__ import annotations
+
+import argparse
+import platform
+import sys
+import time
+from datetime import date
+from pathlib import Path
+
+import numpy as np
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "src"))
+
+from dflab import __version__  # noqa: E402
+from dflab.classify import QUADRANTS, classify_panel  # noqa: E402
+from dflab.datagen import DGPConfig, generate_panel  # noqa: E402
+from dflab.pipeline import (  # noqa: E402
+    pinball_table,
+    run_backtest,
+    run_reconciliation_study,
+)
+from dflab.plots import (  # noqa: E402
+    plot_accuracy_by_quadrant,
+    plot_demand_quadrants,
+    plot_example_series,
+    plot_reconciliation_gain,
+)
+
+BASELINE = "snaive[m=52]"
+
+
+def fmt(v: float, nd: int = 4) -> str:
+    return "n/a" if v is None or not np.isfinite(v) else f"{v:.{nd}f}"
+
+
+def md_table(header: list[str], rows: list[list[str]]) -> str:
+    out = ["| " + " | ".join(header) + " |", "|" + "---|" * len(header)]
+    out += ["| " + " | ".join(r) + " |" for r in rows]
+    return "\n".join(out)
+
+
+def main(argv=None) -> int:
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--quick", action="store_true", help="small panel, 2 windows")
+    ap.add_argument("--no-figures", action="store_true")
+    ap.add_argument("--outdir", default=str(ROOT / "docs"))
+    args = ap.parse_args(argv)
+
+    t_start = time.perf_counter()
+
+    if args.quick:
+        cfg = DGPConfig(n_products=3, n_regions=3, n_channels=2, n_periods=210)
+        horizon, step, n_windows, min_train = 13, 13, 2, 130
+    else:
+        cfg = DGPConfig()
+        horizon, step, n_windows, min_train = 13, 13, 4, 156
+
+    print("Generating panel ...", flush=True)
+    panel = generate_panel(cfg)
+    print(" ", panel.describe(), flush=True)
+    print(" ", panel.hierarchy.summary(), flush=True)
+
+    label_cut = panel.n_periods - horizon - step * (n_windows - 1)
+    profiles = classify_panel(panel.y[:, :label_cut])
+
+    # How much of the assortment can a multiplicative seasonal engine actually
+    # serve? Anything with a zero week cannot support the model at all.
+    n_zero_week = int(np.sum(panel.y[:, :label_cut].min(axis=1) <= 0))
+
+    print("Running rolling-origin backtest ...", flush=True)
+    t0 = time.perf_counter()
+    res = run_backtest(
+        panel,
+        horizon=horizon,
+        step=step,
+        n_windows=n_windows,
+        min_train=min_train,
+        verbose=True,
+    )
+    backtest_seconds = time.perf_counter() - t0
+
+    print("Running hierarchical reconciliation study ...", flush=True)
+    t0 = time.perf_counter()
+    rec = run_reconciliation_study(
+        panel,
+        horizon=horizon,
+        n_windows=min(2, n_windows),
+        step=step,
+        min_train=min_train,
+        verbose=True,
+    )
+    reconcile_seconds = time.perf_counter() - t0
+
+    agg = res.overall()
+    bq = res.by_quadrant()
+    counts = res.quadrant_counts()
+    fva = res.value_add(BASELINE)
+    order = sorted(agg, key=lambda k: agg[k]["wape"])
+
+    # ---- figures ---------------------------------------------------------
+    figures: list[str] = []
+    if not args.no_figures:
+        out = Path(args.outdir)
+        print("Writing figures ...", flush=True)
+        figures.append(
+            plot_accuracy_by_quadrant(
+                bq,
+                out / "accuracy_by_quadrant.png",
+                methods=res.methods(),
+                counts=counts,
+            )
+        )
+        figures.append(plot_demand_quadrants(profiles, out / "demand_quadrants.png"))
+        picks, labels = [], []
+        for q in QUADRANTS:
+            sel = [i for i, p in enumerate(profiles) if p.quadrant == q]
+            if sel:
+                best = max(sel, key=lambda i: profiles[i].mean_demand)
+                picks.append(best)
+                labels.append(
+                    f"{'/'.join(panel.keys[best])} - {q} "
+                    f"(ADI {profiles[best].adi:.2f}, CV2 {profiles[best].cv2:.2f})"
+                )
+        figures.append(
+            plot_example_series(
+                panel.y, picks, labels, out / "example_series.png", cut=res.cuts[0]
+            )
+        )
+        figures.append(
+            plot_reconciliation_gain(rec.table, out / "reconciliation.png")
+        )
+
+    total_seconds = time.perf_counter() - t_start
+
+    # ---- results.md ------------------------------------------------------
+    lines: list[str] = []
+    A = lines.append
+    A("# Benchmark results")
+    A("")
+    A(f"Generated by `benchmarks/run_benchmarks.py` on {date.today().isoformat()} ")
+    A(f"with dflab {__version__}, Python {platform.python_version()}, ")
+    A(f"numpy {np.__version__}. Total runtime {total_seconds:.0f}s.")
+    A("")
+    A("## Data-generating process")
+    A("")
+    A(
+        f"- {cfg.n_products} products x {cfg.n_regions} regions x {cfg.n_channels} "
+        f"channels = {panel.n_bottom} bottom series, {panel.hierarchy.n_nodes} "
+        f"hierarchy nodes"
+    )
+    A(f"- {cfg.n_periods} weekly periods, seasonal cycle m = {cfg.season_length}")
+    A(
+        f"- multiplicative product-family seasonality (amplitude "
+        f"{cfg.seasonal_amplitude:.2f}) with a region-specific phase shift"
+    )
+    A(
+        f"- item-level trend, promotions on ~{cfg.promo_rate:.0%} of weeks with "
+        f"lift up to {cfg.promo_lift:.1f}x and a {1 - cfg.post_promo_dip:.0%} "
+        f"post-promotion dip"
+    )
+    A(
+        f"- {cfg.npi_share:.0%} of items introduced mid-history, "
+        f"{cfg.discontinued_share:.0%} discontinued with a decay to zero"
+    )
+    A(f"- integer demand, seed {cfg.seed}")
+    A(f"- {panel.describe()}")
+    A("")
+    A("## Demand classification (training window only)")
+    A("")
+    A(
+        f"Quadrants computed on the first {label_cut} periods, i.e. before the "
+        f"first forecast origin, so the grouping cannot leak test-period behaviour."
+    )
+    A("")
+    rows = []
+    for q in QUADRANTS:
+        sel = [p for p in profiles if p.quadrant == q]
+        if not sel:
+            rows.append([q, "0", "-", "-", "-", "-"])
+            continue
+        share = sum(p.mean_demand for p in sel) / sum(p.mean_demand for p in profiles)
+        rows.append(
+            [
+                q,
+                str(len(sel)),
+                f"{np.mean([p.adi for p in sel]):.2f}",
+                f"{np.mean([p.cv2 for p in sel]):.2f}",
+                f"{np.mean([p.zero_share for p in sel]):.1%}",
+                f"{share:.1%}",
+            ]
+        )
+    A(
+        md_table(
+            ["quadrant", "series", "mean ADI", "mean CV2", "zero weeks", "share of volume"],
+            rows,
+        )
+    )
+    A("")
+    A("## Backtest configuration")
+    A("")
+    A(
+        f"Rolling origin, horizon {horizon} weeks, step {step}, "
+        f"{len(res.cuts)} windows, cut-offs at {res.cuts}. "
+        f"Minimum training length {min_train} periods. "
+        f"Every model is re-fitted at every cut-off; MASE/RMSSE denominators and "
+        f"quadrant labels are recomputed from the training window only."
+    )
+    A("")
+    A(
+        f"`hw_mul[m=52]` is reported for completeness, but {n_zero_week} of the "
+        f"{panel.n_bottom} series ({n_zero_week / panel.n_bottom:.0%}) contain at "
+        f"least one zero week in the first training window and therefore cannot "
+        f"support a multiplicative seasonal model at all; those fits fall back to "
+        f"the additive form automatically."
+    )
+    A("")
+    A("## Overall accuracy (pooled over all series and windows)")
+    A("")
+    A(
+        "WAPE is pooled as `sum|error| / sum|actual|` rather than averaged over "
+        "series, so a one-unit-a-year SKU does not outvote the top seller. "
+        f"FVA is Forecast Value Add against `{BASELINE}` on pooled WAPE."
+    )
+    A("")
+    rows = [
+        [
+            m,
+            fmt(agg[m]["wape"]),
+            fmt(agg[m]["mase"], 3),
+            fmt(agg[m]["rmsse"], 3),
+            fmt(agg[m]["smape"], 3),
+            fmt(agg[m]["pct_bias"], 3),
+            fmt(fva[m], 3),
+            f"{res.fit_seconds.get(m, float('nan')):.1f}",
+        ]
+        for m in order
+    ]
+    A(
+        md_table(
+            ["method", "WAPE", "MASE", "RMSSE", "sMAPE", "bias%", "FVA vs snaive", "fit s"],
+            rows,
+        )
+    )
+    A("")
+    for metric, title in (
+        ("wape", "WAPE by demand quadrant"),
+        ("mase", "MASE by demand quadrant"),
+    ):
+        A(f"## {title}")
+        A("")
+        header = ["method"] + [f"{q} (n={counts[q]})" for q in QUADRANTS]
+        rows = [
+            [m] + [fmt(bq[m][q].get(metric, float("nan")), 4 if metric == "wape" else 3)
+                   for q in QUADRANTS]
+            for m in order
+        ]
+        A(md_table(header, rows))
+        A("")
+
+    A("## Best method per quadrant")
+    A("")
+    rows = []
+    for q, (mth, v) in res.best_by_quadrant().items():
+        base_v = bq[BASELINE][q].get("wape", float("nan"))
+        gain = 1.0 - v / base_v if np.isfinite(base_v) and base_v > 0 else float("nan")
+        rows.append([q, str(counts[q]), mth, fmt(v), fmt(base_v), fmt(gain, 3)])
+    A(md_table(["quadrant", "series", "best method", "WAPE", "snaive WAPE", "FVA"], rows))
+    A("")
+
+    pt = pinball_table(res, "gbt_mean")
+    if pt:
+        A("## Quantile forecasts (gradient boosting, direct quantile loss)")
+        A("")
+        A(
+            "Pinball loss is in demand units per period; coverage is the share of "
+            "actuals at or below the quantile forecast, so it should land near the "
+            "nominal level."
+        )
+        A("")
+        taus = sorted(
+            float(k.split("_", 1)[1])
+            for k in pt
+            if k.startswith("pinball_") and k != "pinball_mean"
+        )
+        rows = [
+            [
+                f"{t:g}",
+                fmt(pt.get(f"pinball_{t:g}", float("nan")), 3),
+                fmt(pt.get(f"coverage_{t:g}", float("nan")), 3),
+                f"{t:g}",
+            ]
+            for t in taus
+        ]
+        A(md_table(["quantile", "pinball loss", "empirical coverage", "nominal"], rows))
+        A("")
+
+    A("## Hierarchical reconciliation")
+    A("")
+    A(
+        f"Base forecasts are produced independently at each of the "
+        f"{rec.n_nodes} nodes (Holt-Winters additive where there are two full "
+        f"seasonal cycles of dense history, SES or SBA otherwise), then "
+        f"reconciled. WAPE by level, pooled over {len(rec.cuts)} windows of "
+        f"horizon {rec.horizon}. MinT uses a Schafer-Strimmer shrunk residual "
+        f"covariance; the fitted intensity on the last window was "
+        f"{rec.shrinkage:.3f}."
+    )
+    A("")
+    A(rec.as_markdown())
+    A("")
+    A(
+        "`base` is the unreconciled set of independent forecasts. Its coherency "
+        "error is the number an S&OP meeting argues about: the amount by which "
+        "the bottom-level plan fails to add up to the level everyone else is "
+        "looking at."
+    )
+    A("")
+    A("## Runtime")
+    A("")
+    A(
+        md_table(
+            ["stage", "seconds"],
+            [
+                ["backtest (all methods, all windows)", f"{backtest_seconds:.1f}"],
+                ["reconciliation study", f"{reconcile_seconds:.1f}"],
+                ["total", f"{total_seconds:.1f}"],
+            ],
+        )
+    )
+    A("")
+    if figures:
+        A("## Figures")
+        A("")
+        for f in figures:
+            A(f"- `{Path(f).relative_to(ROOT)}`")
+        A("")
+    A("## Reproduce")
+    A("")
+    A("```bash")
+    A("pip install -e .")
+    A("python benchmarks/run_benchmarks.py")
+    A("```")
+    A("")
+    A(
+        f"Platform for this run: {platform.system()} {platform.machine()}, "
+        f"Python {platform.python_version()}."
+    )
+    A("")
+
+    out_path = ROOT / "benchmarks" / "results.md"
+    out_path.write_text("\n".join(lines), encoding="utf-8")
+    print(f"\nwrote {out_path}")
+    for f in figures:
+        print(f"wrote {f}")
+
+    print("\nHeadline numbers")
+    print(f"  best overall WAPE: {order[0]} = {agg[order[0]]['wape']:.4f}")
+    print(f"  {BASELINE} WAPE:   {agg[BASELINE]['wape']:.4f}")
+    for q, (mth, v) in res.best_by_quadrant().items():
+        print(f"  best in {q:<13}{mth:<14}WAPE {v:.4f}")
+    print(f"  MinT bottom-level WAPE: {rec.table['mint']['bottom']:.4f}")
+    print(f"  base bottom-level WAPE: {rec.table['base']['bottom']:.4f}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
