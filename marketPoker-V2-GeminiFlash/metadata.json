@@ -1,0 +1,6 @@
+{
+  "name": "Market Poker",
+  "description": "High-stakes strategic web game combining Texas Hold'em poker, order-book financial trading, prediction markets, and quantitative game theory with AI bots.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

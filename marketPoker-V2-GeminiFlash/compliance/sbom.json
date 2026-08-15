@@ -1,0 +1,45 @@
+{
+  "$schema": "http://cyclonedx.org/schema/bom-1.5.json",
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.5",
+  "version": 1,
+  "metadata": {
+    "component": {
+      "name": "market-poker",
+      "version": "1.0.0",
+      "type": "application"
+    }
+  },
+  "components": [
+    {
+      "name": "react",
+      "version": "19.0.1",
+      "licenses": [{ "license": { "id": "MIT" } }]
+    },
+    {
+      "name": "react-dom",
+      "version": "19.0.1",
+      "licenses": [{ "license": { "id": "MIT" } }]
+    },
+    {
+      "name": "lucide-react",
+      "version": "0.546.0",
+      "licenses": [{ "license": { "id": "ISC" } }]
+    },
+    {
+      "name": "canvas-confetti",
+      "version": "1.9.4",
+      "licenses": [{ "license": { "id": "ISC" } }]
+    },
+    {
+      "name": "motion",
+      "version": "12.23.24",
+      "licenses": [{ "license": { "id": "MIT" } }]
+    },
+    {
+      "name": "tailwindcss",
+      "version": "4.1.14",
+      "licenses": [{ "license": { "id": "MIT" } }]
+    }
+  ]
+}
